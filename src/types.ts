@@ -16,4 +16,7 @@ export interface Task {
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
   autostart: boolean;
+  backgroundColor: string;
+  backgroundImage: string;
+  transparency: number;
 }

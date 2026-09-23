@@ -48,14 +48,23 @@ export function upsertTask(task: Task) {
 }
 
 export function loadSettings(): AppSettings {
+  const defaults: AppSettings = {
+    theme: 'system',
+    autostart: false,
+    backgroundColor: '',
+    backgroundImage: '',
+    transparency: 14,
+  };
   try {
+    const saved = { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') } as AppSettings;
     return {
-      theme: 'system',
-      autostart: false,
-      ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'),
+      ...saved,
+      backgroundColor: /^#[0-9a-f]{6}$/i.test(saved.backgroundColor) ? saved.backgroundColor : '',
+      backgroundImage: typeof saved.backgroundImage === 'string' && saved.backgroundImage.startsWith('data:image/jpeg;base64,') ? saved.backgroundImage : '',
+      transparency: Number.isFinite(saved.transparency) ? Math.min(70, Math.max(0, saved.transparency)) : 14,
     };
   } catch {
-    return { theme: 'system', autostart: false };
+    return defaults;
   }
 }
 
