@@ -6,6 +6,7 @@ import './styles.css';
 
 const params = new URLSearchParams(location.search);
 const isEditor = params.get('view') === 'editor';
+document.documentElement.dataset.view = isEditor ? 'editor' : 'main';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>{isEditor ? <EditorWindow /> : <MainWindow />}</React.StrictMode>,

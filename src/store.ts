@@ -2,6 +2,29 @@ import type { AppSettings, Task } from './types';
 
 const TASKS_KEY = 'desktop-todo.tasks.v1';
 const SETTINGS_KEY = 'desktop-todo.settings.v1';
+const WINDOW_LAYOUT_KEY = 'desktop-todo.window-layout.v1';
+
+export interface WindowLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function loadWindowLayout(): WindowLayout | null {
+  try {
+    const layout = JSON.parse(localStorage.getItem(WINDOW_LAYOUT_KEY) ?? 'null') as WindowLayout | null;
+    if (layout && [layout.x, layout.y, layout.width, layout.height].every(Number.isFinite)
+      && layout.width >= 300 && layout.height >= 300) return layout;
+  } catch {
+    // Ignore invalid saved geometry and use the configured default window size.
+  }
+  return null;
+}
+
+export function saveWindowLayout(layout: WindowLayout) {
+  localStorage.setItem(WINDOW_LAYOUT_KEY, JSON.stringify(layout));
+}
 
 export function loadTasks(): Task[] {
   try {

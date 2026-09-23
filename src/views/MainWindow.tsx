@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { emit, listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { availableMonitors, getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { Check, Clock3, History, Maximize2, Moon, Plus, Settings, Sun, X } from 'lucide-react';
-import { dueTone, formatDue, loadSettings, loadTasks, saveSettings, saveTasks } from '../store';
+import { dueTone, formatDue, loadSettings, loadTasks, loadWindowLayout, saveSettings, saveTasks, saveWindowLayout } from '../store';
 import type { AppSettings, Task } from '../types';
 
 function openEditor(taskId?: string, onError?: (message: string) => void) {
@@ -31,7 +31,7 @@ export function MainWindow() {
   const [tasks, setTasks] = useState<Task[]>(loadTasks);
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [resizeMode, setResizeMode] = useState(false);
+  const [adjustMode, setAdjustMode] = useState(false);
   const [editorError, setEditorError] = useState('');
   const [now, setNow] = useState(Date.now());
 
@@ -64,6 +64,24 @@ export function MainWindow() {
     const root = document.documentElement;
     root.dataset.theme = settings.theme;
   }, [settings.theme]);
+
+  useEffect(() => {
+    const layout = loadWindowLayout();
+    if (!layout) return;
+    const restore = async () => {
+      const currentWindow = getCurrentWindow();
+      const monitors = await availableMonitors();
+      const visible = monitors.some(({ position, size }) =>
+        layout.x < position.x + size.width - 80
+        && layout.x + layout.width > position.x + 80
+        && layout.y < position.y + size.height - 40
+        && layout.y + layout.height > position.y + 40,
+      );
+      await currentWindow.setSize(new PhysicalSize(layout.width, layout.height));
+      if (visible) await currentWindow.setPosition(new PhysicalPosition(layout.x, layout.y));
+    };
+    void restore().catch((error) => console.error('无法恢复便签位置', error));
+  }, []);
 
   useEffect(() => {
     const checkReminders = async () => {
@@ -120,10 +138,28 @@ export function MainWindow() {
     }
   };
 
-  const toggleResize = async () => {
-    const next = !resizeMode;
-    setResizeMode(next);
-    await getCurrentWindow().setResizable(next);
+  const startAdjustment = async () => {
+    try {
+      await getCurrentWindow().setResizable(true);
+      setAdjustMode(true);
+      setSettingsOpen(false);
+    } catch (error) {
+      console.error('无法开始调整便签', error);
+      setEditorError('无法开始调整便签，请重启程序后重试。');
+    }
+  };
+
+  const finishAdjustment = async () => {
+    try {
+      const currentWindow = getCurrentWindow();
+      const [position, size] = await Promise.all([currentWindow.innerPosition(), currentWindow.innerSize()]);
+      await currentWindow.setResizable(false);
+      saveWindowLayout({ x: position.x, y: position.y, width: size.width, height: size.height });
+      setAdjustMode(false);
+    } catch (error) {
+      console.error('无法保存便签位置', error);
+      setEditorError('无法保存便签位置，请重试。');
+    }
   };
 
   const showEditor = (taskId?: string) => {
@@ -133,11 +169,11 @@ export function MainWindow() {
 
   return (
     <main className="sticky-shell">
-      <header className="sticky-header" data-tauri-drag-region>
-        <div className="brand" data-tauri-drag-region>
-          <span className="brand-dot" />
-          <span>待办</span>
-          <small>{activeTasks.length}</small>
+      <header className="sticky-header" data-tauri-drag-region={adjustMode ? '' : undefined}>
+        <div className="brand" data-tauri-drag-region={adjustMode ? '' : undefined}>
+          <span className="brand-dot" data-tauri-drag-region={adjustMode ? '' : undefined} />
+          <span data-tauri-drag-region={adjustMode ? '' : undefined}>待办</span>
+          <small data-tauri-drag-region={adjustMode ? '' : undefined}>{activeTasks.length}</small>
         </div>
         <div className="header-actions">
           <button className="icon-button" title="新建任务" onClick={() => showEditor()}><Plus size={19} /></button>
@@ -170,7 +206,7 @@ export function MainWindow() {
         })}
       </section>
 
-      {resizeMode && <div className="resize-banner">拖动窗口边缘调整大小 <button onClick={toggleResize}>完成</button></div>}
+      {adjustMode && <div className="resize-banner">拖动顶部移动，拖动边缘调整大小 <button onClick={() => void finishAdjustment()}>完成</button></div>}
 
       {settingsOpen && (
         <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSettingsOpen(false)}>
@@ -189,8 +225,8 @@ export function MainWindow() {
               <label className="switch"><input type="checkbox" checked={settings.autostart} onChange={(e) => updateSettings({ autostart: e.target.checked })} /><i /></label>
             </div>
             <div className="setting-row">
-              <div><strong>调整便签大小</strong><span>开启后可拖动主窗口边缘</span></div>
-              <button className="secondary-button" onClick={() => { void toggleResize(); setSettingsOpen(false); }}><Maximize2 size={15} />开始调整</button>
+              <div><strong>调整便签位置和大小</strong><span>调整时拖动顶部移动，拖动边缘缩放</span></div>
+              <button className="secondary-button" onClick={() => void startAdjustment()}><Maximize2 size={15} />开始调整</button>
             </div>
             <div className="history-block">
               <h3><History size={16} />已完成任务 <small>{completedTasks.length}</small></h3>

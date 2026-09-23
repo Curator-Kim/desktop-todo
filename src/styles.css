@@ -3,7 +3,7 @@
   color: #202124;
   background: #f7f7f5;
   font-synthesis: none;
-  --surface: rgba(250, 250, 248, .96);
+  --surface: rgba(250, 250, 248, .86);
   --card: #ffffff;
   --text: #202124;
   --muted: #777a80;
@@ -16,17 +16,22 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --surface: rgba(31,32,32,.97); --card:#292b2b; --text:#f1f2ef; --muted:#a7aaa6; --border:#3d403f; --accent:#82baa9; --accent-soft:#253d37; --overdue-bg:#47282b; --overdue-border:#855158; background:#1f2020; color:#f1f2ef; }
+  :root:not([data-theme="light"]) { --surface: rgba(31,32,32,.84); --card:#292b2b; --text:#f1f2ef; --muted:#a7aaa6; --border:#3d403f; --accent:#82baa9; --accent-soft:#253d37; --overdue-bg:#47282b; --overdue-border:#855158; background:#1f2020; color:#f1f2ef; }
 }
-:root[data-theme="dark"] { --surface: rgba(31,32,32,.97); --card:#292b2b; --text:#f1f2ef; --muted:#a7aaa6; --border:#3d403f; --accent:#82baa9; --accent-soft:#253d37; --overdue-bg:#47282b; --overdue-border:#855158; background:#1f2020; color:#f1f2ef; }
-:root[data-theme="light"] { --surface:rgba(250,250,248,.96); --card:#fff; --text:#202124; --muted:#777a80; --border:#e3e3df; --accent:#397166; --accent-soft:#e3f0ec; --overdue-bg:#fff0f1; --overdue-border:#f2a7ad; background:#f7f7f5; color:#202124; }
+:root[data-theme="dark"] { --surface: rgba(31,32,32,.84); --card:#292b2b; --text:#f1f2ef; --muted:#a7aaa6; --border:#3d403f; --accent:#82baa9; --accent-soft:#253d37; --overdue-bg:#47282b; --overdue-border:#855158; background:#1f2020; color:#f1f2ef; }
+:root[data-theme="light"] { --surface:rgba(250,250,248,.86); --card:#fff; --text:#202124; --muted:#777a80; --border:#e3e3df; --accent:#397166; --accent-soft:#e3f0ec; --overdue-bg:#fff0f1; --overdue-border:#f2a7ad; background:#f7f7f5; color:#202124; }
+:root[data-view="main"] { background:transparent; }
+:root[data-view="main"][data-theme="dark"] { --card:rgba(41,43,43,.76); }
+:root[data-view="main"][data-theme="light"] { --card:rgba(255,255,255,.76); }
+@media (prefers-color-scheme: dark) { :root[data-view="main"]:not([data-theme="light"]) { --card:rgba(41,43,43,.76); } }
 
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; }
 button, input, select { font: inherit; }
 button { color: inherit; }
 
-.sticky-shell { height: 100%; display: flex; flex-direction: column; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.sticky-shell { height: 100%; display: flex; flex-direction: column; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius:16px; overflow:hidden; }
+.sticky-header[data-tauri-drag-region] { cursor:move; }
 .sticky-header { height: 54px; flex: 0 0 auto; display:flex; align-items:center; justify-content:space-between; padding:0 10px 0 16px; border-bottom:1px solid var(--border); user-select:none; }
 .brand,.header-actions { display:flex; align-items:center; gap:9px; }
 .brand { font-weight:650; letter-spacing:.02em; }
