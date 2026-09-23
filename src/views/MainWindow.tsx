@@ -8,7 +8,7 @@ import { Check, Clock3, History, Maximize2, Moon, Plus, Settings, Sun, X } from 
 import { dueTone, formatDue, loadSettings, loadTasks, saveSettings, saveTasks } from '../store';
 import type { AppSettings, Task } from '../types';
 
-function openEditor(taskId?: string) {
+function openEditor(taskId?: string, onError?: (message: string) => void) {
   const label = taskId ? `task-${taskId}` : `task-new-${Date.now()}`;
   const query = taskId ? `&taskId=${encodeURIComponent(taskId)}` : '';
   const win = new WebviewWindow(label, {
@@ -21,7 +21,10 @@ function openEditor(taskId?: string) {
     center: true,
     resizable: true,
   });
-  win.once('tauri://error', (error) => console.error(error));
+  void win.once('tauri://error', (error) => {
+    console.error('无法打开任务编辑窗口', error.payload);
+    onError?.('无法打开任务编辑窗口，请重启程序后重试。');
+  });
 }
 
 export function MainWindow() {
@@ -29,6 +32,7 @@ export function MainWindow() {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resizeMode, setResizeMode] = useState(false);
+  const [editorError, setEditorError] = useState('');
   const [now, setNow] = useState(Date.now());
 
   const refresh = useCallback(() => setTasks(loadTasks()), []);
@@ -122,6 +126,11 @@ export function MainWindow() {
     await getCurrentWindow().setResizable(next);
   };
 
+  const showEditor = (taskId?: string) => {
+    setEditorError('');
+    openEditor(taskId, setEditorError);
+  };
+
   return (
     <main className="sticky-shell">
       <header className="sticky-header" data-tauri-drag-region>
@@ -131,15 +140,17 @@ export function MainWindow() {
           <small>{activeTasks.length}</small>
         </div>
         <div className="header-actions">
-          <button className="icon-button" title="新建任务" onClick={() => openEditor()}><Plus size={19} /></button>
+          <button className="icon-button" title="新建任务" onClick={() => showEditor()}><Plus size={19} /></button>
           <button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
           <button className="icon-button" title="隐藏到托盘" onClick={() => getCurrentWindow().hide()}><X size={18} /></button>
         </div>
       </header>
 
+      {editorError && <div role="alert" className="editor-error" onClick={() => setEditorError('')}>{editorError}</div>}
+
       <section className="task-list" aria-label="待办任务">
         {activeTasks.length === 0 ? (
-          <button className="empty-state" onClick={() => openEditor()}>
+          <button className="empty-state" onClick={() => showEditor()}>
             <span className="empty-plus"><Plus size={24} /></span>
             <strong>暂时没有待办</strong>
             <span>点击创建第一项任务</span>
@@ -150,7 +161,7 @@ export function MainWindow() {
           return (
             <article className="task-card" key={task.id} style={{ background: tone.background, borderColor: tone.border }}>
               <button className="complete-button" title="完成任务" onClick={() => completeTask(task.id)}><Check size={16} /></button>
-              <button className="task-main" onClick={() => openEditor(task.id)}>
+              <button className="task-main" onClick={() => showEditor(task.id)}>
                 <strong>{task.title}</strong>
                 <span style={{ color: tone.accent }}><Clock3 size={13} />{overdue ? '已逾期 · ' : ''}{formatDue(task.dueAt)}</span>
               </button>

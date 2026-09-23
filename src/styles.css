@@ -34,6 +34,7 @@ button { color: inherit; }
 .brand small { min-width:21px; height:20px; padding:0 6px; display:grid; place-items:center; border-radius:10px; background:var(--accent-soft); color:var(--accent); font-size:11px; }
 .icon-button { width:34px; height:34px; border:0; border-radius:9px; background:transparent; display:grid; place-items:center; cursor:pointer; color:var(--muted); }
 .icon-button:hover { background:var(--accent-soft); color:var(--accent); }
+.editor-error { margin:10px 12px 0; padding:9px 11px; border:1px solid var(--overdue-border); border-radius:9px; background:var(--overdue-bg); color:var(--text); font-size:12px; cursor:pointer; }
 .task-list { flex:1; overflow:auto; padding:12px; scrollbar-width:thin; }
 .task-card { min-height:63px; margin-bottom:9px; display:flex; align-items:center; border:1px solid var(--border); border-radius:13px; transition:transform .15s, box-shadow .15s; overflow:hidden; }
 .task-card:hover { transform:translateY(-1px); box-shadow:0 5px 18px rgba(20,30,25,.08); }
