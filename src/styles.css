@@ -61,8 +61,9 @@ button { color: inherit; }
 .empty-plus { width:44px; height:44px; border-radius:14px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); margin-bottom:4px; }
 .modal-backdrop { position:fixed; inset:0; z-index:10; background:rgba(18,20,19,.32); display:grid; place-items:center; padding:14px; }
 .settings-panel { width:min(520px,100%); max-height:calc(100vh - 28px); overflow:auto; background:var(--panel-surface); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:18px; }
+.settings-shell { width:100%; height:100%; overflow:auto; padding:16px; background:var(--panel-surface); color:var(--text); }
+.settings-shell .settings-panel { width:100%; max-height:none; overflow:visible; border:0; border-radius:0; box-shadow:none; padding:0; }
 .settings-panel>header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; }
-.settings-panel>header { cursor:grab; }
 .settings-panel h2 { margin:0 0 3px; font-size:20px; }
 .settings-panel header p { margin:0; color:var(--muted); font-size:12px; }
 .setting-row { display:flex; justify-content:space-between; align-items:center; gap:15px; padding:16px 2px; border-bottom:1px solid var(--border); }

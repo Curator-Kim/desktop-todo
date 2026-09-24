@@ -26,6 +26,10 @@ export function saveWindowLayout(layout: WindowLayout) {
   localStorage.setItem(WINDOW_LAYOUT_KEY, JSON.stringify(layout));
 }
 
+export function clearWindowLayout() {
+  localStorage.removeItem(WINDOW_LAYOUT_KEY);
+}
+
 export function loadTasks(): Task[] {
   try {
     return JSON.parse(localStorage.getItem(TASKS_KEY) ?? '[]') as Task[];
@@ -47,14 +51,18 @@ export function upsertTask(task: Task) {
   saveTasks(tasks);
 }
 
-export function loadSettings(): AppSettings {
-  const defaults: AppSettings = {
+export function defaultSettings(): AppSettings {
+  return {
     theme: 'system',
     autostart: false,
     backgroundColor: '',
     backgroundImage: '',
     transparency: 14,
   };
+}
+
+export function loadSettings(): AppSettings {
+  const defaults = defaultSettings();
   try {
     const saved = { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') } as AppSettings;
     return {
