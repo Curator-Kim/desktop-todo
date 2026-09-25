@@ -2,24 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
+import { check, type Update } from '@tauri-apps/plugin-updater';
 import { History, ImagePlus, Moon, RefreshCw, Sun, X } from 'lucide-react';
 import appPackage from '../../package.json';
 import { clearWindowLayout, defaultSettings, loadSettings, loadTasks, saveSettings, saveTasks } from '../store';
 import type { AppSettings, Task } from '../types';
 
 type UpdateStatus =
-  | { kind: 'idle' | 'checking' | 'error' }
-  | { kind: 'latest' | 'available'; version: string; url: string };
-
-function compareVersions(left: string, right: string) {
-  const parts = (version: string) => version.replace(/^v/, '').split('.').map(Number);
-  const a = parts(left);
-  const b = parts(right);
-  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
-    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) - (b[i] ?? 0);
-  }
-  return 0;
-}
+  | { kind: 'idle' | 'checking' | 'latest' }
+  | { kind: 'available' | 'downloading' | 'installing'; version: string; percent?: number }
+  | { kind: 'error'; message: string };
 
 async function imageAsBackground(file: File) {
   const bitmap = await createImageBitmap(file);
@@ -45,6 +37,8 @@ export function SettingsWindow() {
   const [settingsError, setSettingsError] = useState('');
   const [resetMessage, setResetMessage] = useState('');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: 'idle' });
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
+  const [confirmUpdate, setConfirmUpdate] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const completedTasks = useMemo(() => tasks.filter((task) => task.completedAt).sort((a, b) => +new Date(b.completedAt!) - +new Date(a.completedAt!)), [tasks]);
   const refresh = useCallback(() => setTasks(loadTasks()), []);
@@ -96,35 +90,46 @@ export function SettingsWindow() {
 
   const checkForUpdates = async () => {
     setLinkCopied(false);
+    setConfirmUpdate(false);
+    if (pendingUpdate) await pendingUpdate.close().catch((error) => console.error('无法释放旧更新检查', error));
+    setPendingUpdate(null);
     setUpdateStatus({ kind: 'checking' });
-    const request = async (url: string, headers?: HeadersInit) => {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 8_000);
-      try {
-        return await fetch(url, { headers, cache: 'no-store', signal: controller.signal });
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    };
     try {
-      let version: string | undefined;
-      try {
-        const response = await request('https://api.github.com/repos/Curator-Kim/desktop-todo/releases/latest', { Accept: 'application/vnd.github+json' });
-        if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
-        const release = await response.json() as { tag_name?: string };
-        version = release.tag_name?.replace(/^v/, '');
-      } catch {
-        const response = await request('https://raw.githubusercontent.com/Curator-Kim/desktop-todo/main/updates.json');
-        if (!response.ok) throw new Error(`Version file returned ${response.status}`);
-        const fallback = await response.json() as { version?: string };
-        version = fallback.version;
+      const update = await check();
+      if (update) {
+        setPendingUpdate(update);
+        setUpdateStatus({ kind: 'available', version: update.version });
+      } else {
+        setUpdateStatus({ kind: 'latest' });
       }
-      if (!version || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Invalid release version');
-      const url = `https://github.com/Curator-Kim/desktop-todo/releases/tag/v${version}`;
-      setUpdateStatus({ kind: compareVersions(version, appPackage.version) > 0 ? 'available' : 'latest', version, url });
     } catch (error) {
       console.error('无法检查更新', error);
-      setUpdateStatus({ kind: 'error' });
+      setUpdateStatus({ kind: 'error', message: '检查失败，请确认网络连接后重试。' });
+    }
+  };
+
+  const installUpdate = async () => {
+    if (!pendingUpdate) return;
+    const version = pendingUpdate.version;
+    let downloaded = 0;
+    let total: number | undefined;
+    setConfirmUpdate(false);
+    setUpdateStatus({ kind: 'downloading', version });
+    try {
+      await pendingUpdate.downloadAndInstall((event) => {
+        if (event.event === 'Started') {
+          downloaded = 0;
+          total = event.data.contentLength;
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          setUpdateStatus({ kind: 'downloading', version, percent: total ? Math.min(100, Math.round(downloaded / total * 100)) : undefined });
+        } else {
+          setUpdateStatus({ kind: 'installing', version });
+        }
+      });
+    } catch (error) {
+      console.error('无法安装更新', error);
+      setUpdateStatus({ kind: 'error', message: '自动更新失败，原有版本未被替换。请重试或手动下载安装包。' });
     }
   };
 
@@ -184,11 +189,20 @@ export function SettingsWindow() {
             </div>
             <div className="setting-row">
               <div><strong>检查更新</strong><span>当前版本 v{appPackage.version}</span></div>
-              <button className="secondary-button" disabled={updateStatus.kind === 'checking'} onClick={() => void checkForUpdates()}><RefreshCw size={15} />{updateStatus.kind === 'checking' ? '检查中…' : '检测升级'}</button>
+              <button className="secondary-button" disabled={updateStatus.kind === 'checking' || updateStatus.kind === 'downloading' || updateStatus.kind === 'installing'} onClick={() => void checkForUpdates()}><RefreshCw size={15} />{updateStatus.kind === 'checking' ? '检查中…' : '检测升级'}</button>
             </div>
-            {updateStatus.kind === 'available' && <div className="update-result"><span>发现新版本 v{updateStatus.version}</span><input aria-label="新版下载地址" readOnly value={updateStatus.url} onFocus={(event) => event.target.select()} /><button onClick={() => void navigator.clipboard.writeText(updateStatus.url).then(() => setLinkCopied(true)).catch(() => setSettingsError('复制失败，请选中下载地址手动复制。'))}>{linkCopied ? '已复制' : '复制下载链接'}</button></div>}
-            {updateStatus.kind === 'latest' && <p className="update-result">已是最新版本 v{updateStatus.version}</p>}
-            {updateStatus.kind === 'error' && <p className="setting-error" role="alert">检查失败，请确认网络连接后重试。</p>}
+            {updateStatus.kind === 'available' && <div className="update-result update-prompt">
+              <span>发现新版本 v{updateStatus.version}</span>
+              {!confirmUpdate ? <button className="secondary-button" onClick={() => setConfirmUpdate(true)}>下载并安装</button> : <>
+                <p>更新会关闭程序。请先保存所有正在编辑的任务，确认后将自动下载安装。</p>
+                <div className="setting-actions"><button className="secondary-button" onClick={() => setConfirmUpdate(false)}>取消</button><button className="primary-button" onClick={() => void installUpdate()}>确认更新</button></div>
+              </>}
+              <button className="update-copy" onClick={() => void navigator.clipboard.writeText(`https://github.com/Curator-Kim/desktop-todo/releases/tag/v${updateStatus.version}`).then(() => setLinkCopied(true)).catch(() => setSettingsError('复制失败，请手动访问 GitHub 发布页。'))}>{linkCopied ? '已复制下载页' : '复制手动下载地址'}</button>
+            </div>}
+            {updateStatus.kind === 'downloading' && <div className="update-result" role="status">正在下载 v{updateStatus.version}{updateStatus.percent === undefined ? '…' : `：${updateStatus.percent}%`}</div>}
+            {updateStatus.kind === 'installing' && <div className="update-result" role="status">下载完成，正在校验并启动安装，请稍候…</div>}
+            {updateStatus.kind === 'latest' && <p className="update-result">已是最新版本 v{appPackage.version}</p>}
+            {updateStatus.kind === 'error' && <p className="setting-error" role="alert">{updateStatus.message} GitHub 发布页：https://github.com/Curator-Kim/desktop-todo/releases/latest</p>}
             <div className="setting-row"><div><strong>恢复默认设置</strong><span>重置外观、开机启动及便签位置和大小；保留所有任务</span></div><button className="secondary-button" onClick={() => void resetAllSettings()}>恢复默认设置</button></div>
             {resetMessage && <p className="update-result" role="status">{resetMessage}</p>}
             <div className="history-block">

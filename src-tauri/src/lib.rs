@@ -31,6 +31,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![show_settings_command])
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "显示便签", true, None::<&str>)?;
             let settings = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;

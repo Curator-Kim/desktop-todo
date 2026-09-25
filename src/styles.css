@@ -81,7 +81,12 @@ button { color: inherit; }
 .setting-error { margin:10px 0; color:#d35862; font-size:12px; }
 .update-result { margin:9px 0 3px; padding:9px 10px; border-radius:8px; background:var(--accent-soft); color:var(--accent); font-size:12px; display:flex; flex-wrap:wrap; align-items:center; gap:7px; }
 .update-result input { width:100%; min-width:0; border:1px solid var(--border); border-radius:5px; padding:4px 6px; color:var(--text); background:var(--panel-surface); font-size:10px; }
-.update-result button { margin-left:auto; display:flex; align-items:center; gap:4px; border:0; background:transparent; color:var(--accent); font-size:11px; cursor:pointer; }
+.update-prompt { flex-direction:column; align-items:stretch; }
+.update-prompt > span { color:var(--text); font-weight:600; font-size:13px; }
+.update-prompt p { margin:0; line-height:1.5; color:var(--text); }
+.update-prompt .setting-actions { justify-content:flex-end; }
+.update-prompt .secondary-button, .update-prompt .primary-button { width:max-content; font-size:12px; }
+.update-copy { align-self:flex-end; border:0; background:transparent; color:var(--accent); font-size:11px; cursor:pointer; }
 .segmented { display:flex; padding:3px; border-radius:9px; background:var(--card); border:1px solid var(--border); }
 .segmented button { border:0; padding:6px 8px; background:transparent; border-radius:6px; font-size:11px; display:flex; gap:4px; align-items:center; cursor:pointer; }
 .segmented button.active { background:var(--accent-soft); color:var(--accent); }
