@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { emit, listen } from '@tauri-apps/api/event';
+import { useEffect, useState } from 'react';
+import { emit } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { check, type Update } from '@tauri-apps/plugin-updater';
-import { History, ImagePlus, Moon, RefreshCw, Sun, X } from 'lucide-react';
+import { ImagePlus, Moon, RefreshCw, Sun, X } from 'lucide-react';
 import appPackage from '../../package.json';
-import { clearWindowLayout, defaultSettings, loadSettings, loadTasks, saveSettings, saveTasks } from '../store';
-import type { AppSettings, Task } from '../types';
+import { changeData, dataDirectory, defaultSettings, loadSettings, migrateData, saveSettings, watchData } from '../store';
+import type { AppSettings } from '../types';
 
 type UpdateStatus =
   | { kind: 'idle' | 'checking' | 'latest' }
@@ -32,47 +32,43 @@ async function imageAsBackground(file: File) {
 }
 
 export function SettingsWindow() {
-  const [tasks, setTasks] = useState<Task[]>(loadTasks);
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
+  const [directory, setDirectory] = useState(dataDirectory);
+  const [migrating, setMigrating] = useState(false);
+  const [migrationResult, setMigrationResult] = useState<{ text: string; error: boolean }>();
   const [settingsError, setSettingsError] = useState('');
   const [resetMessage, setResetMessage] = useState('');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: 'idle' });
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [confirmUpdate, setConfirmUpdate] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const completedTasks = useMemo(() => tasks.filter((task) => task.completedAt).sort((a, b) => +new Date(b.completedAt!) - +new Date(a.completedAt!)), [tasks]);
-  const refresh = useCallback(() => setTasks(loadTasks()), []);
-  useEffect(() => {
-    const unlisten = listen('tasks-changed', refresh);
-    window.addEventListener('storage', refresh);
-    return () => { void unlisten.then((fn) => fn()); window.removeEventListener('storage', refresh); };
-  }, [refresh]);
+  useEffect(() => watchData(() => { setSettings(loadSettings()); setDirectory(dataDirectory()); }), []);
   useEffect(() => { document.documentElement.dataset.theme = settings.theme; }, [settings.theme]);
-  const restoreTask = (id: string) => {
-    const next = loadTasks().map((task) => task.id === id ? { ...task, completedAt: undefined } : task);
-    saveTasks(next); setTasks(next); void emit('tasks-changed');
-  };
-  const deleteTask = (id: string) => {
-    const next = loadTasks().filter((task) => task.id !== id);
-    saveTasks(next); setTasks(next); void emit('tasks-changed');
-  };
-  const updateSettings = async (patch: Partial<AppSettings>) => {
-    const next = { ...settings, ...patch };
+  const chooseDirectory = async () => {
+    setMigrating(true);
+    setMigrationResult(undefined);
     try {
-      setSettingsError('');
-      saveSettings(next);
-      setSettings(next);
-      void emit('settings-changed');
-      if ('autostart' in patch) {
-        if (patch.autostart) await enable(); else await disable();
-        next.autostart = await isEnabled();
-        setSettings({ ...next });
-        saveSettings(next);
-        void emit('settings-changed');
+      const previous = dataDirectory();
+      if (await migrateData() && dataDirectory() !== previous) {
+        setMigrationResult({ text: '数据已迁移。旧目录中的副本已保留。', error: false });
       }
     } catch (error) {
+      setMigrationResult({ text: `迁移失败，仍使用原目录：${String(error)}`, error: true });
+    } finally {
+      setMigrating(false);
+    }
+  };
+  const updateSettings = async (patch: Partial<AppSettings>) => {
+    try {
+      setSettingsError('');
+      if ('autostart' in patch) {
+        if (patch.autostart) await enable(); else await disable();
+        patch = { ...patch, autostart: await isEnabled() };
+      }
+      await saveSettings(patch);
+    } catch (error) {
       console.error('无法保存设置', error);
-      setSettingsError('设置保存失败。背景图片可能占用过多空间，请换一张图片。');
+      setSettingsError('设置保存失败，请确认当前数据目录可写。');
     }
   };
 
@@ -140,10 +136,7 @@ export function SettingsWindow() {
       await disable();
       const defaults = defaultSettings();
       defaults.autostart = await isEnabled();
-      saveSettings(defaults);
-      setSettings(defaults);
-      clearWindowLayout();
-      await emit('settings-changed');
+      await changeData({ kind: 'resetSettings', settings: defaults });
       await emit('reset-window-layout');
       setResetMessage('已恢复默认设置，任务和完成记录均已保留。');
     } catch (error) {
@@ -155,6 +148,11 @@ export function SettingsWindow() {
     <main className="settings-shell">
       <section className="settings-panel">
             <header><div><h2>设置</h2><p>桌面便签与程序偏好</p></div><button className="icon-button" title="关闭设置" onClick={() => void getCurrentWindow().hide()}><X size={19} /></button></header>
+            <div className="setting-row">
+              <div className="data-location"><strong>数据存放位置</strong><span title={directory}>{directory}</span></div>
+              <button className="secondary-button" disabled={migrating} onClick={() => void chooseDirectory()}>{migrating ? '处理中…' : '选择目录并迁移'}</button>
+            </div>
+            {migrationResult && <p className={migrationResult.error ? 'setting-error' : 'update-result'} role={migrationResult.error ? 'alert' : 'status'}>{migrationResult.text}</p>}
             <div className="setting-row">
               <div><strong>外观</strong><span>选择便签的颜色模式</span></div>
               <div className="segmented">
@@ -205,16 +203,6 @@ export function SettingsWindow() {
             {updateStatus.kind === 'error' && <p className="setting-error" role="alert">{updateStatus.message} GitHub 发布页：https://github.com/Curator-Kim/desktop-todo/releases/latest</p>}
             <div className="setting-row"><div><strong>恢复默认设置</strong><span>重置外观、开机启动及便签位置和大小；保留所有任务</span></div><button className="secondary-button" onClick={() => void resetAllSettings()}>恢复默认设置</button></div>
             {resetMessage && <p className="update-result" role="status">{resetMessage}</p>}
-            <div className="history-block">
-              <h3><History size={16} />已完成任务 <small>{completedTasks.length}</small></h3>
-              {completedTasks.length === 0 ? <p className="muted-center">还没有已完成的任务</p> : completedTasks.map((task) => (
-                <div className="history-item" key={task.id}>
-                  <div><strong>{task.title}</strong><span>{task.completedAt ? new Date(task.completedAt).toLocaleString('zh-CN') : ''}</span></div>
-                  <button onClick={() => restoreTask(task.id)}>恢复</button>
-                  <button className="danger-text" onClick={() => deleteTask(task.id)}>删除</button>
-                </div>
-              ))}
-            </div>
       </section>
     </main>
   );

@@ -1,4 +1,6 @@
 import type { AppSettings, Task } from './types';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 const TASKS_KEY = 'desktop-todo.tasks.v1';
 const SETTINGS_KEY = 'desktop-todo.settings.v1';
@@ -11,9 +13,72 @@ export interface WindowLayout {
   height: number;
 }
 
+interface Data {
+  tasks: Task[];
+  settings: Partial<AppSettings>;
+  layout: WindowLayout | null;
+}
+
+interface Snapshot { data: Data; directory: string; revision: number }
+
+type Change =
+  | { kind: 'settings'; patch: Partial<AppSettings> }
+  | { kind: 'resetSettings'; settings: AppSettings }
+  | { kind: 'layout'; layout: WindowLayout }
+  | { kind: 'saveTask'; task: Task; existing: boolean }
+  | { kind: 'complete'; id: string; at: string }
+  | { kind: 'restore' | 'delete'; id: string }
+  | { kind: 'notify'; id: string; key: string };
+
+let snapshot: Snapshot;
+const subscribers = new Set<() => void>();
+
+function accept(next: Snapshot) {
+  if (snapshot && snapshot.revision >= next.revision) return;
+  snapshot = next;
+  subscribers.forEach((refresh) => refresh());
+}
+
+function legacyData(): Data {
+  const read = <T,>(key: string, fallback: T): T => JSON.parse(localStorage.getItem(key) ?? JSON.stringify(fallback)) as T;
+  return { tasks: read(TASKS_KEY, []), settings: read(SETTINGS_KEY, {}), layout: read(WINDOW_LAYOUT_KEY, null) };
+}
+
+export async function initializeData() {
+  // Existing disk data takes precedence; read the old browser storage only when seeding.
+  const existing = await invoke<Snapshot | null>('load_data');
+  if (existing) accept(existing);
+  else accept(await invoke<Snapshot>('load_data', { legacy: legacyData() }));
+  const stop = await listen('data-changed', () => void invoke<Snapshot>('load_data').then(accept).catch(console.error));
+  try {
+    accept(await invoke<Snapshot>('load_data'));
+  } catch (error) {
+    stop();
+    throw error;
+  }
+}
+
+export function watchData(refresh: () => void) {
+  subscribers.add(refresh);
+  refresh();
+  return () => { subscribers.delete(refresh); };
+}
+
+export function dataDirectory() { return snapshot.directory; }
+
+export async function migrateData() {
+  const next = await invoke<Snapshot | null>('migrate_data');
+  if (next) accept(next);
+  return Boolean(next);
+}
+
+export async function changeData(change: Change) {
+  accept(await invoke<Snapshot>('change_data', { change }));
+}
+
 export function loadWindowLayout(): WindowLayout | null {
   try {
-    const layout = JSON.parse(localStorage.getItem(WINDOW_LAYOUT_KEY) ?? 'null') as WindowLayout | null;
+    const layout = snapshot.data.layout;
     if (layout && [layout.x, layout.y, layout.width, layout.height].every(Number.isFinite)
       && layout.width >= 300 && layout.height >= 300) return layout;
   } catch {
@@ -23,32 +88,15 @@ export function loadWindowLayout(): WindowLayout | null {
 }
 
 export function saveWindowLayout(layout: WindowLayout) {
-  localStorage.setItem(WINDOW_LAYOUT_KEY, JSON.stringify(layout));
-}
-
-export function clearWindowLayout() {
-  localStorage.removeItem(WINDOW_LAYOUT_KEY);
+  return changeData({ kind: 'layout', layout });
 }
 
 export function loadTasks(): Task[] {
-  try {
-    return JSON.parse(localStorage.getItem(TASKS_KEY) ?? '[]') as Task[];
-  } catch {
-    return [];
-  }
+  return snapshot.data.tasks;
 }
 
-export function saveTasks(tasks: Task[]) {
-  localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
-  window.dispatchEvent(new Event('tasks-local-change'));
-}
-
-export function upsertTask(task: Task) {
-  const tasks = loadTasks();
-  const index = tasks.findIndex((item) => item.id === task.id);
-  if (index >= 0) tasks[index] = task;
-  else tasks.push(task);
-  saveTasks(tasks);
+export function upsertTask(task: Task, existing: boolean) {
+  return changeData({ kind: 'saveTask', task, existing });
 }
 
 export function defaultSettings(): AppSettings {
@@ -64,7 +112,7 @@ export function defaultSettings(): AppSettings {
 export function loadSettings(): AppSettings {
   const defaults = defaultSettings();
   try {
-    const saved = { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') } as AppSettings;
+    const saved = { ...defaults, ...snapshot.data.settings };
     return {
       ...saved,
       backgroundColor: /^#[0-9a-f]{6}$/i.test(saved.backgroundColor) ? saved.backgroundColor : '',
@@ -76,8 +124,8 @@ export function loadSettings(): AppSettings {
   }
 }
 
-export function saveSettings(settings: AppSettings) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+export function saveSettings(patch: Partial<AppSettings>) {
+  return changeData({ kind: 'settings', patch });
 }
 
 export function formatDue(iso: string) {

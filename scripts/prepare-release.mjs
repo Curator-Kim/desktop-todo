@@ -3,8 +3,9 @@ import path from 'node:path';
 
 const project = process.cwd();
 const { version } = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'));
-const installer = path.join(project, 'src-tauri', 'target', 'release', 'bundle', 'nsis', `桌面待办_${version}_x64-setup.exe`);
-const portable = path.join(project, 'src-tauri', 'target', 'release', 'zhuomian-daiban.exe');
+const target = process.env.CARGO_TARGET_DIR || path.join(project, 'src-tauri', 'target');
+const installer = path.join(target, 'release', 'bundle', 'nsis', `桌面待办_${version}_x64-setup.exe`);
+const portable = path.join(target, 'release', 'zhuomian-daiban.exe');
 const signature = (await readFile(`${installer}.sig`, 'utf8')).trim();
 if (!signature) throw new Error('Missing updater signature');
 

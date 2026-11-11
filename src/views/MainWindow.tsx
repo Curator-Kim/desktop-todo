@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, MouseEvent } from 'react';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { listen } from '@tauri-apps/api/event';
 import { availableMonitors, getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
-import { Check, Clock3, Plus, Settings, X } from 'lucide-react';
-import { dueTone, formatDue, loadSettings, loadTasks, loadWindowLayout, saveTasks, saveWindowLayout } from '../store';
+import { Check, Clock3, History, Plus, Settings, X } from 'lucide-react';
+import { changeData, dueTone, formatDue, loadSettings, loadTasks, loadWindowLayout, saveWindowLayout, watchData } from '../store';
 import type { AppSettings, Task } from '../types';
 
 function openEditor(taskId?: string, onError?: (message: string) => void) {
@@ -34,32 +34,25 @@ export function MainWindow() {
   const [editorError, setEditorError] = useState('');
   const [now, setNow] = useState(Date.now());
 
-  const refresh = useCallback(() => setTasks(loadTasks()), []);
+  const reminderRunning = useRef(false);
   const activeTasks = useMemo(
     () => tasks.filter((task) => !task.completedAt).sort((a, b) => +new Date(a.dueAt) - +new Date(b.dueAt)),
     [tasks],
   );
   useEffect(() => {
-    const unlistenPromise = listen('tasks-changed', refresh);
-    const settingsChangedPromise = listen('settings-changed', () => setSettings(loadSettings()));
+    const stop = watchData(() => { setTasks(loadTasks()); setSettings(loadSettings()); });
     const resetLayoutPromise = listen('reset-window-layout', () => {
       const currentWindow = getCurrentWindow();
       void currentWindow.setSize(new PhysicalSize(380, 520)).then(() => currentWindow.center())
         .catch((error) => console.error('无法恢复便签默认位置', error));
     });
-    const refreshStorage = () => { refresh(); setSettings(loadSettings()); };
-    window.addEventListener('storage', refreshStorage);
-    window.addEventListener('tasks-local-change', refresh);
     const clock = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => {
-      void unlistenPromise.then((fn) => fn());
-      void settingsChangedPromise.then((fn) => fn());
+      stop();
       void resetLayoutPromise.then((fn) => fn());
-      window.removeEventListener('storage', refreshStorage);
-      window.removeEventListener('tasks-local-change', refresh);
       clearInterval(clock);
     };
-  }, [refresh]);
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -109,23 +102,27 @@ export function MainWindow() {
 
   useEffect(() => {
     const checkReminders = async () => {
-      const current = loadTasks();
-      let changed = false;
-      for (const task of current) {
-        if (task.completedAt || !task.reminderEnabled) continue;
-        const reminderAt = +new Date(task.dueAt) - task.reminderMinutes * 60_000;
-        const key = `${task.dueAt}:${task.reminderMinutes}`;
-        if (Date.now() >= reminderAt && task.notifiedKey !== key) {
-          let allowed = await isPermissionGranted();
-          if (!allowed) allowed = (await requestPermission()) === 'granted';
-          if (allowed) {
-            sendNotification({ title: task.title, body: `截止时间：${formatDue(task.dueAt)}` });
-            task.notifiedKey = key;
-            changed = true;
+      if (reminderRunning.current) return;
+      reminderRunning.current = true;
+      try {
+        for (const task of loadTasks()) {
+          if (task.completedAt || !task.reminderEnabled) continue;
+          const reminderAt = +new Date(task.dueAt) - task.reminderMinutes * 60_000;
+          const key = `${task.dueAt}:${task.reminderMinutes}`;
+          if (Date.now() >= reminderAt && task.notifiedKey !== key) {
+            let allowed = await isPermissionGranted();
+            if (!allowed) allowed = (await requestPermission()) === 'granted';
+            if (allowed) {
+              sendNotification({ title: task.title, body: `截止时间：${formatDue(task.dueAt)}` });
+              await changeData({ kind: 'notify', id: task.id, key });
+            }
           }
         }
+      } catch (error) {
+        console.error('无法处理到期提醒', error);
+      } finally {
+        reminderRunning.current = false;
       }
-      if (changed) saveTasks(current);
     };
     void checkReminders();
     const timer = window.setInterval(checkReminders, 30_000);
@@ -133,9 +130,8 @@ export function MainWindow() {
   }, []);
 
   const completeTask = (id: string) => {
-    const next = loadTasks().map((task) => task.id === id ? { ...task, completedAt: new Date().toISOString() } : task);
-    saveTasks(next);
-    setTasks(next);
+    void changeData({ kind: 'complete', id, at: new Date().toISOString() })
+      .catch(() => setEditorError('无法完成任务，请确认当前数据目录可写。'));
   };
 
   const dragWindow = (event: MouseEvent<HTMLElement>) => {
@@ -169,6 +165,7 @@ export function MainWindow() {
         </div>
         <div className="header-actions">
           <button className="icon-button" title="新建任务" onClick={() => showEditor()}><Plus size={19} /></button>
+          <button className="icon-button" title="已完成任务" onClick={() => void invoke('show_history_command').catch(() => setEditorError('无法打开已完成任务。'))}><History size={18} /></button>
           <button className="icon-button" title="设置" onClick={() => void invoke('show_settings_command').catch((error) => console.error('无法打开设置窗口', error))}><Settings size={18} /></button>
           <button className="icon-button" title="隐藏到托盘" onClick={() => getCurrentWindow().hide()}><X size={18} /></button>
         </div>

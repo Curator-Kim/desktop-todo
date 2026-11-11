@@ -3,6 +3,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
+mod data;
 
 fn show_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -25,10 +26,31 @@ fn show_settings_command(app: tauri::AppHandle) {
     show_settings(&app);
 }
 
+fn show_history(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("history") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+#[tauri::command]
+fn show_history_command(app: tauri::AppHandle) {
+    show_history(&app);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![show_settings_command])
+        .manage(data::StoreState::default())
+        .invoke_handler(tauri::generate_handler![
+            show_settings_command,
+            show_history_command,
+            data::load_data,
+            data::change_data,
+            data::migrate_data
+        ])
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -36,7 +58,8 @@ pub fn run() {
             let show = MenuItem::with_id(app, "show", "显示便签", true, None::<&str>)?;
             let settings = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
+            let history = MenuItem::with_id(app, "history", "已完成任务", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &history, &settings, &quit])?;
 
             let mut tray = TrayIconBuilder::new()
                 .menu(&menu)
@@ -45,6 +68,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => show_main(app),
                     "settings" => show_settings(app),
+                    "history" => show_history(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -66,7 +90,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() == "main" || window.label() == "settings" {
+            if matches!(window.label(), "main" | "settings" | "history") {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();

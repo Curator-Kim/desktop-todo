@@ -5,6 +5,7 @@
   "windows": [
     "main",
     "settings",
+    "history",
     "task-*"
   ],
   "permissions": [
