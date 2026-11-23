@@ -14,6 +14,7 @@ export interface Task {
 }
 
 export interface AppSettings {
+  view: 'list' | 'calendar';
   theme: 'system' | 'light' | 'dark';
   autostart: boolean;
   backgroundColor: string;

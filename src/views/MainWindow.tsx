@@ -5,8 +5,9 @@ import { listen } from '@tauri-apps/api/event';
 import { availableMonitors, getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
-import { Check, Clock3, History, Plus, Settings, X } from 'lucide-react';
-import { changeData, dueTone, formatDue, loadSettings, loadTasks, loadWindowLayout, saveWindowLayout, watchData } from '../store';
+import { CalendarDays, Check, Clock3, History, List, MonitorDown, Plus, Settings, X } from 'lucide-react';
+import { CalendarView } from './CalendarView';
+import { changeData, dueTone, formatDue, loadSettings, loadTasks, loadWindowLayout, saveSettings, saveWindowLayout, watchData } from '../store';
 import type { AppSettings, Task } from '../types';
 
 function openEditor(taskId?: string, onError?: (message: string) => void) {
@@ -33,6 +34,9 @@ export function MainWindow() {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const [editorError, setEditorError] = useState('');
   const [now, setNow] = useState(Date.now());
+  const [desktop, setDesktop] = useState(false);
+  const [embedding, setEmbedding] = useState(false);
+  const desktopTransition = useRef(false);
 
   const reminderRunning = useRef(false);
   const activeTasks = useMemo(
@@ -41,6 +45,10 @@ export function MainWindow() {
   );
   useEffect(() => {
     const stop = watchData(() => { setTasks(loadTasks()); setSettings(loadSettings()); });
+    const desktopListener = listen<boolean>('desktop-mode', (event) => {
+      desktopTransition.current = event.payload;
+      setDesktop(event.payload);
+    });
     const resetLayoutPromise = listen('reset-window-layout', () => {
       const currentWindow = getCurrentWindow();
       void currentWindow.setSize(new PhysicalSize(380, 520)).then(() => currentWindow.center())
@@ -49,6 +57,7 @@ export function MainWindow() {
     const clock = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => {
       stop();
+      void desktopListener.then((stop) => stop());
       void resetLayoutPromise.then((fn) => fn());
       clearInterval(clock);
     };
@@ -83,8 +92,10 @@ export function MainWindow() {
     let disposed = false;
     let listeners: Array<() => void> = [];
     const saveLayout = () => {
+      if (desktop || desktopTransition.current) return;
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
+        if (desktopTransition.current) return;
         void Promise.all([currentWindow.innerPosition(), currentWindow.innerSize()])
           .then(([position, size]) => saveWindowLayout({ x: position.x, y: position.y, width: size.width, height: size.height }))
           .catch((error) => console.error('无法保存便签位置', error));
@@ -98,7 +109,7 @@ export function MainWindow() {
       window.clearTimeout(timer);
       listeners.forEach((stop) => stop());
     };
-  }, []);
+  }, [desktop]);
 
   useEffect(() => {
     const checkReminders = async () => {
@@ -135,6 +146,7 @@ export function MainWindow() {
   };
 
   const dragWindow = (event: MouseEvent<HTMLElement>) => {
+    if (desktop) return;
     if (event.button !== 0) return;
     if (!(event.target instanceof Element)) return;
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -155,8 +167,17 @@ export function MainWindow() {
     '--note-background-image': settings.backgroundImage ? `url("${settings.backgroundImage}")` : 'none',
   } as CSSProperties;
 
+  const embed = async () => {
+    desktopTransition.current = true;
+    setEmbedding(true);
+    setEditorError('');
+    try { await invoke('embed_desktop'); setDesktop(true); }
+    catch (error) { desktopTransition.current = false; setEditorError(`无法融入桌面：${String(error)}`); }
+    finally { setEmbedding(false); }
+  };
+
   return (
-    <main className="sticky-shell" style={noteStyle} onMouseDown={dragWindow}>
+    <main className={`sticky-shell ${desktop ? 'desktop-blended' : ''}`} style={noteStyle} onMouseDown={dragWindow}>
       <header className="sticky-header">
         <div className="brand">
           <span className="brand-dot" />
@@ -164,6 +185,8 @@ export function MainWindow() {
           <small>{activeTasks.length}</small>
         </div>
         <div className="header-actions">
+          <button className="icon-button" title={settings.view === 'calendar' ? '切换列表视图' : '切换日历视图'} onClick={() => void saveSettings({ view: settings.view === 'calendar' ? 'list' : 'calendar' }).catch(() => setEditorError('无法保存视图设置。'))}>{settings.view === 'calendar' ? <List size={18} /> : <CalendarDays size={18} />}</button>
+          <button className="icon-button" title="融入桌面（点击托盘图标恢复）" disabled={embedding} onClick={() => void embed()}><MonitorDown size={18} /></button>
           <button className="icon-button" title="新建任务" onClick={() => showEditor()}><Plus size={19} /></button>
           <button className="icon-button" title="已完成任务" onClick={() => void invoke('show_history_command').catch(() => setEditorError('无法打开已完成任务。'))}><History size={18} /></button>
           <button className="icon-button" title="设置" onClick={() => void invoke('show_settings_command').catch((error) => console.error('无法打开设置窗口', error))}><Settings size={18} /></button>
@@ -173,7 +196,7 @@ export function MainWindow() {
 
       {editorError && <div role="alert" className="editor-error" onClick={() => setEditorError('')}>{editorError}</div>}
 
-      <section className="task-list" aria-label="待办任务">
+      {settings.view === 'calendar' ? <CalendarView tasks={activeTasks} open={(id) => showEditor(id)} now={now} /> : <section className="task-list" aria-label="待办任务">
         {activeTasks.length === 0 ? (
           <div className="empty-state">
             <button className="empty-create" onClick={() => showEditor()}>
@@ -195,7 +218,7 @@ export function MainWindow() {
             </article>
           );
         })}
-      </section>
+      </section>}
 
     </main>
   );

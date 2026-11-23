@@ -101,6 +101,7 @@ export function upsertTask(task: Task, existing: boolean) {
 
 export function defaultSettings(): AppSettings {
   return {
+    view: 'list',
     theme: 'system',
     autostart: false,
     backgroundColor: '',
@@ -115,6 +116,7 @@ export function loadSettings(): AppSettings {
     const saved = { ...defaults, ...snapshot.data.settings };
     return {
       ...saved,
+      view: saved.view === 'calendar' ? 'calendar' : 'list',
       backgroundColor: /^#[0-9a-f]{6}$/i.test(saved.backgroundColor) ? saved.backgroundColor : '',
       backgroundImage: typeof saved.backgroundImage === 'string' && saved.backgroundImage.startsWith('data:image/jpeg;base64,') ? saved.backgroundImage : '',
       transparency: Number.isFinite(saved.transparency) ? Math.min(70, Math.max(0, saved.transparency)) : 14,

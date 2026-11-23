@@ -4,12 +4,19 @@ use tauri::{
     Manager,
 };
 mod data;
+mod desktop;
+#[cfg(windows)]
+mod desktop_rendering;
 
 fn show_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        // Tray callbacks run on the UI thread. Do not synchronously dispatch a
+        // WebView callback which then emits back into the same dispatcher.
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = desktop::restore(&window).await {
+                eprintln!("无法显示主便签：{error}");
+            }
+        });
     }
 }
 
@@ -43,9 +50,11 @@ fn show_history_command(app: tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .manage(data::StoreState::default())
+        .manage(desktop::DesktopState::default())
         .invoke_handler(tauri::generate_handler![
             show_settings_command,
             show_history_command,
+            desktop::embed_desktop,
             data::load_data,
             data::change_data,
             data::migrate_data
@@ -87,9 +96,22 @@ pub fn run() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            // The main window is created hidden to avoid an unstyled flash.
+            // Unlike settings/history, the desktop note must be shown at startup.
+            show_main(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "main"
+                && matches!(
+                    event,
+                    tauri::WindowEvent::Resized(_)
+                        | tauri::WindowEvent::Moved(_)
+                        | tauri::WindowEvent::ScaleFactorChanged { .. }
+                )
+            {
+                desktop::preserve_size(window);
+            }
             if matches!(window.label(), "main" | "settings" | "history") {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
